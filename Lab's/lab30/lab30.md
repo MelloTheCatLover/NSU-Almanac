@@ -1,14 +1,10 @@
 Что такое сокет?
+
 Сокет - специальное псевдоустройство подсистемы STREAMS, используемое для связи между процессами на одной машине или на разных.
   Являются улучшенной версией труб (pipe), которые также позволяют передавать данные между процессами, но обладают рядом недостатков:
     - позволяют передавать данные лишь локально и между двумя процессами (тогда как сокеты позволяют общаться множеству процессов с одним, хранящим серверный сокет (listen(2)))
     - Однонаправленные, тогда как сокеты двунаправленные
 
-
-Вахалия - 17.10
-
-ПРИ КОМПИЛЯЦИИ НАДО ЗАГРУЖАТЬ ДОПОЛНИТЕЛЬНУЮ БИБЛИОТЕКУ socket:
-  gcc -Wall -lsocket file.c
 
 socket(2) - создаёт точку связи и возвращает его дескриптор
   int socket(int domain, int type, int protocol)
@@ -25,21 +21,22 @@ socket(2) - создаёт точку связи и возвращает его 
 
 bind(2) - привязывает имя сокета с его дескриптором
   int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+
+  bind привязывает к сокету sockfd локальный адрес my_addr длиной addrlen. Традиционно, эта операция называется lqприсваивание сокету имени.rq Когда сокет только что создан с помощью socket(2), он существует в пространстве имён (семействе адресов), но не имеет назначенного имени.
+
+
   struct sockaddr {
       sa_family_t sa_family; // domain
       char        sa_data[14]; // socket name
   }; - общая версия структуры
+
+
   struct sockaddr_un {
       sa_family_t sun_family;               // AF_UNIX
       char        sun_path[UNIX_PATH_MAX];  // pathname
   }; - версия для работы с доменом AF_UNIX
 
-listen(2)
-  int listen(int sockfd, int backlog);
-  Помечает сокет по дескриптору sockfd как пассивный, то есть сокет, который будет принимать входящие подключения через accept(2)
-    Иначе говоря, регистрирует сокет как серверный
-  backlog показывает максимальную длину очереди ожидаемых подключений от клиентов
-  Перед использованием listen должны быть вызваны socket(2) для создания сокета и bind(2) для возможности обращаться к сокету извне
+
 
 accept(2)
   int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
@@ -52,123 +49,85 @@ connect(2)
   int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
   Соединяет дескриптор сокета sockfd с адресом, определённым в структуре addr
 
-send(2)
-  *Тут не используется, но имеет смысл изучить*
-
-recv(2)
-  *Тут не используется, но имеет смысл изучить*
-
 read/write и другие базовые IO операции для сокетов работают через драйвера
 
 как работает atexit()? В частности, как он работает, если в конце функции у нас return, а не exit?
 */
 
 
-# SERVER.C
 
-    #include <unistd.h>
-    #include <stdio.h>
-    #include <sys/un.h>
-    #include <ctype.h>
-    #include <stdlib.h>
-    #include <sys/socket.h>
-    #include <string.h>
-    #include <signal.h>
-    #include <locale.h>
-    char *path = "./socket";
 
-    void sig_handler(int signo)
-    {
-        unlink(path);
-        exit(0);
-    }
-    void unlinker(){
-        unlink(path);
-    }
-    int main(int argc, char *argv[]) {
-    setlocale(LC_ALL, getenv("LANG"));
-        signal(SIGINT, sig_handler);
-        struct sockaddr_un address;
-        char buffer[100];
-        int descriptor, client;
-        ssize_t reader;
-        if ((descriptor = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-            perror("error with socket");
-            return -1;
-        }
-        memset(&address, 0, sizeof(address));
-        address.sun_family = AF_UNIX;
-        strncpy(address.sun_path, path, sizeof(address.sun_path)-1);
-        if (bind(descriptor, (struct sockaddr*)&address, sizeof(address)) == -1) {
-            perror("error while binding");
-            return -1;
-        }
-        if (atexit(unlinker)!=0){
-            perror("error while atexit");
-            return -1;
-        }
-        if (listen(descriptor, 5) == -1) {
-            perror("error while listening");
-            return -1;
-        }
-        if ((client = accept(descriptor, NULL, NULL)) == -1) {
-            perror("error while accepting");
-            close(descriptor);
-            return -1;
-        }
-        unlink(path);
-        while ((reader=read(client,buffer,sizeof(buffer))) > 0){
-            for(int i = 0; i < reader; i++){
-                putchar(toupper(buffer[i]));
-            }
-        }
-        if (reader == -1) {
-            perror("error while reading");
-            return -1;
-        }
-        else if (reader == 0){
-            close(client);
-            close(descriptor);
-            return 0;
-        }
-    }
 
-# CLIENT.C
+Чем сокерт трубы:
 
-    #include <sys/un.h>
-    #include <sys/socket.h>
-    #include <stdlib.h>
-    #include <stdio.h>
-    #include <string.h>
-    #include <unistd.h>
 
-    char *path = "./socket";
 
-    int main(int argc, char *argv[]) {
-        struct sockaddr_un address;
-        char buffer[100];
-        int descriptor;
-        ssize_t reader;
-        if ( (descriptor = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-            perror("error in socket");
-            return -1;
-        }
-        memset(&address, 0, sizeof(address));
-        address.sun_family = AF_UNIX;
-        strncpy(address.sun_path, path, sizeof(address.sun_path)-1);
-        if (connect(descriptor, (struct sockaddr*)&address, sizeof(address)) == -1) {
-            perror("error while connecting");
-            return -1;
-        }
-        memset(buffer, 0, sizeof(buffer));
-        while( (reader=read(STDIN_FILENO, buffer, sizeof(buffer))) > 0){
-            if (write(descriptor, buffer, reader) != reader && reader == -1) {
-                perror("error while writing");
-                return -1;
-            }
-        }
-        close(descriptor);
-        return 0;
-    }
+бинд связывает дескриптор с каким-то файлом.
 
+
+> Сокет - 
+
+`Сокет` - псевдоустройство специального типа, тоже интерфейс гармонического межпроцессного взаимодействия
+
+> Разница именнованный трубы и сокета
+
+Когда процессы взаимодействуют через трубу данные перемешивабтся(все процессы пишут в одно место, нужно продумать как это структурировано), через сокеты процессы взаимодействуют через отдельный stream.
+
+Сигнал - это механизм предназанченнй процессу для сообщения процессом определенных событий. 
+
+Сокет - специальное псевдоустройство подсистемы STREAMS, используемое для связи между процессами на одной машине или на разных.
+  Являются улучшенной версией труб (pipe), которые также позволяют передавать данные между процессами, но обладают рядом недостатков:
+    - позволяют передавать данные лишь локально и между двумя процессами (тогда как сокеты позволяют общаться множеству процессов с одним, хранящим серверный сокет (listen(2)))
+    - Однонаправленные, тогда как сокеты двунаправленные
+
+
+> Отркуть сокет
+
+> Забиндить 
+
+bind(2) 
+  int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+
+  bind привязывает к сокету sockfd локальный адрес my_addr длиной addrlen. Традиционно, эта операция называется lqприсваивание сокету имени.rq Когда сокет только что создан с помощью socket(2), он существует в пространстве имён (семействе адресов), но не имеет назначенного имени.
+
+
+  struct sockaddr {
+      sa_family_t sa_family; // domain
+      char        sa_data[14]; // socket name
+  }; - общая версия структуры
+
+  
+  struct sockaddr_un {
+      sa_family_t sun_family;               // AF_UNIX
+      char        sun_path[UNIX_PATH_MAX];  // pathname
+  }; - версия для работы с доменом AF_UNIX
+
+> Начать слушать
+
+listen(2)
+  int listen(int sockfd, int backlog);
+  Помечает сокет по дескриптору sockfd как пассивный, то есть сокет, который будет принимать входящие подключения через accept(2)
+    Иначе говоря, регистрирует сокет как серверный
+  backlog показывает максимальную длину очереди ожидаемых подключений от клиентов 
+       сокет, то есть как сокет, который будет использоваться для приема входящих
+       запросы на соединение с использованием Accept(2).
+
+       Аргумент sockfd — это файловый дескриптор, ссылающийся на сокет.
+       типа SOCK_STREAM или SOCK_SEQPACKET.
+
+       Аргумент backlog определяет максимальную длину, до которой
+       очередь ожидающих соединений для sockfd может вырасти. Если
+       запрос на соединение поступает, когда очередь заполнена, клиент может
+       получить ошибку с указанием ECONNREFUSED или, если
+       базовый протокол поддерживает повторную передачу, запрос может быть
+       игнорируется, чтобы более поздняя повторная попытка подключения была успешной.
+       
+  Перед использованием listen должны быть вызваны socket(2) для создания сокета и bind(2) для возможности обращаться к сокету извне
+
+> Что происходит под капотом
+>
+
+> Как правильно читать и писать в сокет
+
+Программные каналы можно сдать. Лабы через программные каналы, сигналы. Сдать первую лабу 
 
